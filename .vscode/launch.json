@@ -1,0 +1,28 @@
+{
+  "version": "0.2.0",
+  "configurations": [
+    {
+      "type": "node",
+      "request": "launch",
+      "name": "OpenSage Interactive",
+      "skipFiles": ["<node_internals>/**"],
+      "program": "${workspaceFolder}/opensage.js",
+      "args": ["-c", "${workspaceFolder}"],
+      "console": "integratedTerminal",
+      "env": {
+        "OPENCODE_API_KEY": "${env:OPENCODE_API_KEY}"
+      }
+    },
+    {
+      "type": "node",
+      "request": "launch",
+      "name": "OpenSage - Current Directory",
+      "skipFiles": ["<node_internals>/**"],
+      "program": "${workspaceFolder}/opensage.js",
+      "console": "integratedTerminal",
+      "env": {
+        "OPENCODE_API_KEY": "${env:OPENCODE_API_KEY}"
+      }
+    }
+  ]
+}
