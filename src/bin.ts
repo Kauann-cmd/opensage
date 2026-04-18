@@ -55,6 +55,7 @@ async function main() {
     exit: "Exit OpenSage",
     model: "Change AI model",
     cd: "Change working directory",
+    memory: "Show stored memories",
   };
 
   console.log("\nCommands:");

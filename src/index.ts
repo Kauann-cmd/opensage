@@ -15,6 +15,7 @@ const execAsync = promisify(exec);
 
 const API_BASE = "https://opencode.ai/v1";
 const DEFAULT_MODEL = "big-pickle";
+const MEMORY_FILE = path.join(process.env.HOME || process.env.USERPROFILE || "", ".opensage", "memory.json");
 
 // Tool schemas using Zod
 const ToolSchemas = {
@@ -91,6 +92,21 @@ const ToolSchemas = {
       agent: z.string().optional().describe("Agent type to use (default: build)"),
     }),
   },
+  Memory: {
+    name: "Memory",
+    description: "Store important information in persistent memory for the AI to recall later",
+    parameters: z.object({
+      key: z.string().describe("Key to store the memory (e.g., user-preferences, project-info)"),
+      content: z.string().describe("Content/memory to store"),
+    }),
+  },
+  Recall: {
+    name: "Recall",
+    description: "Retrieve stored memories from persistent memory",
+    parameters: z.object({
+      key: z.string().describe("Key to recall (leave empty to list all keys)"),
+    }),
+  },
 };
 
 type ToolName = keyof typeof ToolSchemas;
@@ -108,6 +124,7 @@ class OpenSage {
   private messages: OpenAI.Chat.CompletionMessageParam[] = [];
   private apiKey: string;
   private tools: Map<string, z.ZodType> = new Map();
+  private memory: Map<string, string> = new Map();
 
   constructor(options: { apiKey?: string; model?: string; workdir?: string } = {}) {
     this.apiKey = options.apiKey || process.env.OPENCODE_API_KEY || "";
@@ -127,6 +144,9 @@ class OpenSage {
     for (const [name, schema] of Object.entries(ToolSchemas)) {
       this.tools.set(name, schema.parameters);
     }
+
+    // Load persistent memory
+    await this.loadMemory();
   }
 
   async callTool(name: string, args: Record<string, unknown>): Promise<ToolResult> {
@@ -272,6 +292,32 @@ class OpenSage {
         return { content: `Error: ${e.message}` };
       }
     },
+
+    Memory: async ({ key, content }) => {
+      try {
+        this.memory.set(key, content);
+        await this.saveMemory();
+        return { content: `Memory saved: "${key}"` };
+      } catch (e: any) {
+        return { content: `Error: ${e.message}` };
+      }
+    },
+
+    Recall: async ({ key }) => {
+      try {
+        if (key) {
+          const value = this.memory.get(key);
+          return { content: value ? `${key}: ${value}` : `No memory found for key: "${key}"` };
+        } else {
+          const keys = Array.from(this.memory.keys());
+          if (keys.length === 0) return { content: "No memories stored" };
+          const list = keys.map(k => `${k}: ${this.memory.get(k)}`).join("\n");
+          return { content: list };
+        }
+      } catch (e: any) {
+        return { content: `Error: ${e.message}` };
+      }
+    },
   };
 
   private buildToolDefinitions(): OpenAI.Chat.CompletionTool[] {
@@ -361,6 +407,7 @@ class OpenSage {
   }
 
   private getSystemPrompt(): string {
+    const memories = Array.from(this.memory.entries()).map(([k, v]) => `${k}: ${v}`).join("\n");
     return `You are **OpenSage**, an advanced AI coding agent forked from the best open source projects (OpenCode, OpenClaude, OpenClaw).
 
 Your defining traits:
@@ -371,6 +418,7 @@ Your defining traits:
 
 WORKING DIRECTORY: ${this.workdir}
 MODEL: ${this.model}
+${memories ? `MEMORIES:\n${memories}` : ""}
 
 CAPABILITIES:
 - Read: Read files with line numbers
@@ -381,13 +429,16 @@ CAPABILITIES:
 - Grep: Search content in files
 - WebSearch: Search the web
 - WebFetch: Fetch URL content
+- Memory: Store important information
+- Recall: Retrieve stored memories
 
 INSTRUCTIONS:
 1. When editing files, READ first to see actual content
 2. Make EXACT string replacements
 3. Execute commands directly, show results
 4. Answer CONCISELY without preamble
-5. Use tools autonomously to complete tasks`;
+5. Use tools autonomously to complete tasks
+6. Use Memory tool to remember important user preferences or project info`;
   }
 
   clearHistory(): void {
@@ -396,6 +447,25 @@ INSTRUCTIONS:
 
   getHistory(): OpenAI.Chat.CompletionMessageParam[] {
     return this.messages;
+  }
+
+  private async saveMemory(): Promise<void> {
+    try {
+      const dir = path.dirname(MEMORY_FILE);
+      await fs.mkdir(dir, { recursive: true });
+      const data = JSON.stringify(Object.fromEntries(this.memory), null, 2);
+      await fs.writeFile(MEMORY_FILE, data, "utf-8");
+    } catch {}
+  }
+
+  private async loadMemory(): Promise<void> {
+    try {
+      if (await fs.access(MEMORY_FILE).then(() => true).catch(() => false)) {
+        const data = await fs.readFile(MEMORY_FILE, "utf-8");
+        const parsed = JSON.parse(data);
+        this.memory = new Map(Object.entries(parsed));
+      }
+    } catch {}
   }
 }
 
